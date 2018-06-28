@@ -12,4 +12,4 @@ For more details refer:
 
 > EXAMPLE
 
-**lastActivityStats.ps1 -TenantName "contoso.onmicrosoft.com" -clientId "74f0e6c8-0a8e-4a9c-9e0e-4c8223013eb9" -redirecturi "urn:ietf:wg:oauth:2.0:oob"
+lastActivityStats.ps1 -TenantName "contoso.onmicrosoft.com" -clientId "74f0e6c8-0a8e-4a9c-9e0e-4c8223013eb9" -redirecturi      "urn:ietf:wg:oauth:2.0:oob"
