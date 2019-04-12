@@ -11,20 +11,7 @@
             > https://developer.microsoft.com/en-us/graph/docs/api-reference/v1.0/api/reportroot_getoffice365activeuserdetail
 
     .EXAMPLE
-        lastActivityStats.ps1 -TenantName "contoso.onmicrosoft.com" -clientId "74f0e6c8-0a8e-4a9c-9e0e-4c8223013eb9" -redirecturi "urn:ietf:wg:oauth:2.0:oob"
-
-    .PARAMETER TentantName
-        Tenant name in the format <tenantname>.onmicrosoft.com
-
-    .PARAMETER clientID
-        The clientID or AppID of the native app created in AzureAD to grant access to the reporting API. This is the application ID of the App registered in Azure AD.
-
-    .Parameter redirecturi
-        The replyURL of the native app created in AzureAD to grant access to the reporting API. This is the redirectURI of the App registered in Azure AD.
-
-    .Parameter resourceAppIDURI
-        Protocol and Hostname for the endpoint you are accessing. For the Graph API enter "https://graph.microsoft.com" This is hardcoded in the script.
-        Hence you needn't pass it while running the script.
+        PS C:\Users\MyPOSH> .\lastActivityStats.ps1
 
     .NOTES
         Author:         Noble K Varghese
@@ -32,175 +19,157 @@
             Creation Date:  15-May-2018
             Purpose/Change: Reference to the article https://www.petri.com/get-mailboxstatistics-cmdlet-wrong, Last Login Date Reported by the Get-MailboxStatistics Cmdlet was not accurate.
                             Re-designed the script to use Microsoft GRAPH API to return lastActivityDate of Users.
+        
+        Version:        3.2
+            Creation Date:  12-April-2019
+            Purpose/Change: Reference to the issue reported https://github.com/noblevarghese/Office365-Users-LastActivityDetails/issues/1, redesigned the script to use OAuth & ADAL based Modern Authentication.
+                            Earlier the script was using Basic Authentication using Get-Credential
 
     .LINK
     https://blogs.technet.microsoft.com/dawiese/2017/04/15/get-office365-usage-reports-from-the-microsoft-graph-using-windows-powershell/
 
 #>
 
-[cmdletbinding()]
-param (
-    [Parameter(Mandatory=$true)]
-    $TenantName,
-
-    [Parameter(Mandatory=$true)]
-    $clientId,
-
-    [Parameter(Mandatory=$true)]
-    $redirecturi,
-
-    [Parameter(Mandatory=$false)]
-    $resourceAppIdURI
-)
-
 ####################################################
 
-function Get-AuthToken ([string]$TenantName, [string]$clientId, [string]$redirecturi,[string]$resourceAppIdURI,[System.Management.Automation.PSCredential]$Credential) {
-
+#region AuthToken
+function Get-AuthToken {
     <#
-        .SYNOPSIS
-        Gets an OAuth token for use with the Microsoft Graph API
-    
-        .DESCRIPTION
-        Gets an OAuth token for use with the Microsoft Graph API
-
-        .EXAMPLE
-        Get-AuthToken -TenantName "contoso.onmicrosoft.com" -clientId "74f0e6c8-0a8e-4a9c-9e0e-4c8223013eb9" -redirecturi "urn:ietf:wg:oauth:2.0:oob" -resourceAppIdURI "https://graph.microsoft.com"
-    
-        .PARAMETER TentantName
-        Tenant name in the format <tenantname>.onmicrosoft.com
-
-        .PARAMETER clientID
-        The clientID or AppID of the native app created in AzureAD to grant access to the reporting API
-
-        .Parameter redirecturi
-        The replyURL of the native app created in AzureAD to grant access to the reporting API
-
-        .Parameter resourceAppIDURI
-        protocol and hostname for the endpoint you are accessing. For the Graph API enter "https://graph.microsoft.com"
-    
-        .NOTES
-        Inital authentication sample from:
-        https://blogs.technet.microsoft.com/paulomarques/2016/03/21/working-with-azure-active-directory-graph-api-from-powershell/
-
+    .SYNOPSIS
+    This function is used to authenticate with the Graph API REST interface
+    .DESCRIPTION
+    The function authenticate with the Graph API Interface with the tenant name
+    .EXAMPLE
+    Get-AuthToken
+    Authenticates you with the Graph API interface
+    .NOTES
+    NAME: Get-AuthToken
     #>
+        [cmdletbinding()]
+        param
+        (
+            [Parameter(Mandatory=$true)]
+            $User
+        )
     
-    #Import the MSOnline module so we can lookup the directory for Microsoft.IdentityModel.Clients.ActiveDirectory.dll and Microsoft.IdentityModel.Clients.ActiveDirectory.WindowsForms.dll
-    #MSOnline module documentation: https://www.powershellgallery.com/packages/MSOnline/1.1.166.0
-    Try {
-
-        Write-Debug "Importing MSONline Module for ADAL assemblies"
-        Import-Module MSOnline -ErrorAction Stop
-    }
-    Catch [System.IO.FileNotFoundException] {
-
-        Write-Warning "The module MSOnline is not installed.`nPlease run Install-Module MSOnline from an elevated window to install it from the PowerShell Gallery"
-        Throw "MSOnline module not installed"
-    }
-    #Get the module folder so we can load the DLLs we want
-    $modulebase = (Get-Module MSONline | Sort Version -Descending | Select -First 1).ModuleBase
-    $adal = "{0}\Microsoft.IdentityModel.Clients.ActiveDirectory.dll" -f $modulebase
-    $adalforms = "{0}\Microsoft.IdentityModel.Clients.ActiveDirectory.WindowsForms.dll" -f $modulebase
-
-    #Attempt to load the assemblies. Without these we cannot continue so we need the user to stop and take an action
-    Try {
-
+        $userUpn = New-Object "System.Net.Mail.MailAddress" -ArgumentList $User
+        $tenant = $userUpn.Host
+    
+        Write-Host "Checking for MSOnline module..."
+        $AadModule = Get-Module -Name "MSOnline" -ListAvailable
+    
+        if ($AadModule -eq $null) {
+            write-host
+            write-host "MSOnline Powershell module not installed..." -f Red
+            write-host "Install by running 'Install-Module MSOnline' or 'Install-Module MSOnline' from an elevated PowerShell prompt" -f Yellow
+            write-host "Script can't continue..." -f Red
+            write-host
+            exit
+        }
+        # Getting path to ActiveDirectory Assemblies
+        # If the module count is greater than 1 find the latest version
+    
+        if($AadModule.count -gt 1){
+            $Latest_Version = ($AadModule | select version | Sort-Object)[-1]
+            $aadModule = $AadModule | ? { $_.version -eq $Latest_Version.version }
+            # Checking if there are multiple versions of the same module found
+    
+            if($AadModule.count -gt 1){
+                $aadModule = $AadModule | select -Unique
+            }
+    
+            $adal = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
+            $adalforms = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.Platform.dll"
+        }
+        else {
+            $adal = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.dll"
+            $adalforms = Join-Path $AadModule.ModuleBase "Microsoft.IdentityModel.Clients.ActiveDirectory.Platform.dll"
+        }
+    
         [System.Reflection.Assembly]::LoadFrom($adal) | Out-Null
         [System.Reflection.Assembly]::LoadFrom($adalforms) | Out-Null
-    }
-    Catch {
-
-        #MSOnline Version 1.0 does not contain the DLLs that we need, a minimum version of 1.1.166.0 is required
-        Write-Warning "Unable to load ADAL assemblies.`nUpdate the MSOnline module by running Install-Module MSOnline -Force -AllowClobber"
-        Throw $error[0]
-    }
-
-    #Build the logon URL with the tenant name
-    $authority = "https://login.windows.net/$TenantName"
-    Write-Verbose "Logon Authority: $authority"
-
-    #Build the auth context and get the result
-    Write-Verbose "Creating AuthContext"
-    $authContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $authority
-    Write-Verbose "Creating AD UserCredential Object"
-    #$Credential = Get-Credential -Credential "admin@M365x615832.onmicrosoft.com"
-    $AdUserCred = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserCredential" -ArgumentList $Credential.username, $Credential.Password
-    Try {
-
-        Write-Verbose "Attempting passive authentication"
-        $authResult = $authContext.AcquireToken($resourceAppIdURI, $clientId,$AdUserCred)
-    }
-    Catch [System.Management.Automation.MethodInvocationException] {
-
-        #The first that the the user runs this, they must open an interactive window to grant permissions to the app
-        If ($error[0].Exception.Message -like "*Send an interactive authorization request for this user and resource*") {
-
-                Write-Warning "The app has not been granted permissions by the user. Opening an interactive prompt to grant permissions"
-                $authResult = $authContext.AcquireToken($resourceAppIdURI, $clientId,$redirectUri, "Always") #Always prompt for user credentials so we don't use Windows Integrated Auth
-        }
-        Else {
-            
-            Throw
-        }
-    }
     
-
-    #Return the authentication token
-    return $authResult
-}
-
+        $clientId = "c2a5cdb6-3f67-4aa8-8c8f-672a65608721"
+        $redirectUri = "urn:myApp"
+        $resourceAppIdURI = "https://graph.microsoft.com"
+        $authority = "https://login.microsoftonline.com/$Tenant"
+    
+        try {
+            $authContext = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext" -ArgumentList $authority
+            # https://msdn.microsoft.com/en-us/library/azure/microsoft.identitymodel.clients.activedirectory.promptbehavior.aspx
+            # Change the prompt behaviour to force credentials each time: Auto, Always, Never, RefreshSession
+            $platformParameters = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.PlatformParameters" -ArgumentList "Auto"
+            $userId = New-Object "Microsoft.IdentityModel.Clients.ActiveDirectory.UserIdentifier" -ArgumentList ($User, "OptionalDisplayableId")
+            $MethodArguments = [Type[]]@("System.String", "System.String", "System.Uri", "Microsoft.IdentityModel.Clients.ActiveDirectory.PromptBehavior", "Microsoft.IdentityModel.Clients.ActiveDirectory.UserIdentifier")
+            $NonAsync = $AuthContext.GetType().GetMethod("AcquireToken", $MethodArguments)
+    
+            if ($NonAsync -ne $null){
+                $authResult = $authContext.AcquireToken($resourceAppIdURI, $clientId, [Uri]$redirectUri, [Microsoft.IdentityModel.Clients.ActiveDirectory.PromptBehavior]::Auto, $userId)
+            }
+            else {
+                $authResult = $authContext.AcquireTokenAsync($resourceAppIdURI, $clientId, [Uri]$redirectUri, $platformParameters, $userId).Result 
+                }
+            # If the accesstoken is valid then create the authentication header
+            
+            if($authResult.AccessToken){
+                # Creating header for Authorization token
+                $authHeader = @{
+                    'Content-Type'='application/json'
+                    'Authorization'="Bearer " + $authResult.AccessToken
+                    'ExpiresOn'=$authResult.ExpiresOn
+                    }
+                return $authHeader
+            }
+            else {
+                Write-Host
+                Write-Host "Authorization Access Token is null, please re-run authentication..." -ForegroundColor Red
+                Write-Host
+                break
+            }
+        }
+        catch {
+            write-host $_.Exception.Message -f Red
+            write-host $_.Exception.ItemName -f Red
+            write-host
+            break
+        }
+    }
+#endregion
+    
 ####################################################
-
+    
 #region Authentication
+write-host
+# Checking if authToken exists before running authentication
 
-if($global:token) {
-
+if($global:authToken){
     # Setting DateTime to Universal time to work in all timezones
     $DateTime = (Get-Date).ToUniversalTime()
-
     # If the authToken exists checking when it expires
-    $TokenExpires = ($token.ExpiresOn.datetime - $DateTime).Minutes
+    $TokenExpires = ($authToken.ExpiresOn.datetime - $DateTime).Minutes
 
-    if($TokenExpires -le 0) {
-
+    if($TokenExpires -le 0){
         write-host "Authentication Token expired" $TokenExpires "minutes ago" -ForegroundColor Yellow
         write-host
-
         # Defining User Principal Name if not present
-
-        if($Cred -eq $null -or $Cred -eq "") {
-
-            $Cred = Get-Credential -Credential "user@domain.onmicrosoft.com"
+        
+        if($User -eq $null -or $User -eq ""){
+            $User = Read-Host -Prompt "Please specify your user principal name for Azure Authentication"
             Write-Host
-        }
-
-        $global:token = Get-AuthToken -TenantName $TenantName -clientId $clientId -redirecturi $redirecturi -resourceAppIdURI "https://graph.microsoft.com" -Credential $cred
-
+            }
+        $global:authToken = Get-AuthToken -User $User
     }
 }
-    
 # Authentication doesn't exist, calling Get-AuthToken function
-
 else {
-
-    if($Cred -eq $null -or $Cred -eq ""){
-
-        $Cred = Get-Credential -Credential "user@domain.onmicrosoft.com"
-        Write-Host
+    if($User -eq $null -or $User -eq ""){
+    $User = Read-Host -Prompt "Please specify your user principal name for Azure Authentication"
+    Write-Host
     }
-    #Getting the authorization token
-    $global:token = Get-AuthToken Get-AuthToken -TenantName $TenantName -clientId $clientId -redirecturi $redirecturi -resourceAppIdURI "https://graph.microsoft.com" -Credential $cred
 
+    # Getting the authorization token
+    $global:authToken = Get-AuthToken -User $User
 }
-
-
-#Build REST API header with authorization token
-$authHeader = @{
-
-    'Content-Type'='application\json'
-    'Authorization'=$token.CreateAuthorizationHeader()
-}
-
 #endregion
 
 ####################################################
@@ -208,7 +177,7 @@ $authHeader = @{
 #region GRAPH Call
 
 $uri = "https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserDetail(period='D30')"
-$result = @(Invoke-RestMethod -Uri $uri -Headers $authHeader -Method Get)
+$result = @(Invoke-RestMethod -Uri $uri -Headers $global:authToken -Method Get)
 $report = ConvertFrom-Csv -InputObject $result
 
 $report | Export-Csv -Path "LastActivityStats_$((Get-Date -uformat %Y%m%d%H%M%S).ToString()).csv" -NoTypeInformation -Encoding UTF8
