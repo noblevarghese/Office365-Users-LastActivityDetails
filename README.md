@@ -12,23 +12,20 @@ For more details refer:
 
 > EXAMPLE
 
-lastActivityStats.ps1 -TenantName "contoso.onmicrosoft.com" -clientId "74f0e6c8-0a8e-4a9c-9e0e-4c8223013eb9" -redirecturi      "urn:ietf:wg:oauth:2.0:oob"
+.\lastActivityStats.ps1
 
-> PARAMETER TentantName
-
-Tenant name in the format <tenantname>.onmicrosoft.com
-   
->  PARAMETER clientID
-
-The clientID or AppID of the native app created in AzureAD to grant access to the reporting API. This is the application ID of the App registered in Azure AD.
-
-> Parameter redirecturi
-
-The replyURL of the native app created in AzureAD to grant access to the reporting API. This is the redirectURI of the App registered in Azure AD.
-
-> Parameter resourceAppIDURI
-
-Protocol and Hostname for the endpoint you are accessing. For the Graph API enter "https://graph.microsoft.com" This is hardcoded in the script. Hence you needn't pass it while running the script.
+> NOTES
+        
+        Author:         Noble K Varghese
+        Version:        3.0.1
+            Creation Date:  15-May-2018
+            Purpose/Change: Reference to the article https://www.petri.com/get-mailboxstatistics-cmdlet-wrong, Last Login Date Reported by the Get-MailboxStatistics Cmdlet was not accurate.
+                            Re-designed the script to use Microsoft GRAPH API to return lastActivityDate of Users.
+        
+        Version:        3.2
+            Creation Date:  12-April-2019
+            Purpose/Change: Reference to the issue reported https://github.com/noblevarghese/Office365-Users-LastActivityDetails/issues/1, redesigned the script to use OAuth & ADAL based Modern Authentication.
+                            Earlier the script was using Basic Authentication using Get-Credential
 
 > Read More:
 https://blogs.technet.microsoft.com/dawiese/2017/04/15/get-office365-usage-reports-from-the-microsoft-graph-using-windows-powershell/
